@@ -1,0 +1,16 @@
+{
+  "name": "node-mail-no-deps",
+  "version": "1.0.0",
+  "description": "SMTP and IMAP over raw node:tls with zero dependencies, plus measured notes on how Node actually behaves when a connect goes wrong.",
+  "type": "module",
+  "exports": {
+    "./tls-connect": "./src/tls-connect.mjs"
+  },
+  "scripts": {
+    "test": "node test/smoke.mjs"
+  },
+  "keywords": ["smtp", "imap", "tls", "email", "zero-dependency", "node"],
+  "license": "MIT",
+  "engines": { "node": ">=18" },
+  "files": ["src", "test", "README.md", "LICENSE"]
+}
