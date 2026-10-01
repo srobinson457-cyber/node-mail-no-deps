@@ -2,6 +2,8 @@
 
 SMTP and IMAP clients written directly against `node:tls`. No npm dependencies, at any depth.
 
+Extracted in September 2026 from private code I wrote and run in production; the history stays private because it contains private data.
+
 ```bash
 node src/smtp-send.mjs --to a@b.com --subject "Hi" --body msg.txt   # dry run by default
 node src/imap-check.mjs

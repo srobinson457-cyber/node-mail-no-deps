@@ -10,6 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, isRetryable, RETRYABLE } from '../src/tls-connect.mjs';
 
 let failed = 0;
@@ -55,7 +56,9 @@ const dir = mkdtempSync(path.join(tmpdir(), 'mailtest-'));
 const bodyFile = path.join(dir, 'body.txt');
 writeFileSync(bodyFile, 'line one\nline two\n');
 
-const SMTP = path.join('src', 'smtp-send.mjs');
+// Resolved from this file, not the current directory, so the suite gives the
+// same answer wherever it is run from.
+const SMTP = fileURLToPath(new URL('../src/smtp-send.mjs', import.meta.url));
 const FAKE = {
   SMTP_HOST: 'smtp.invalid.example',
   SMTP_USER: 'nobody@example.com',
@@ -75,13 +78,20 @@ check('missing body file exits 2', r.code === 2, `exit=${r.code}`);
 // THE IMPORTANT ONE. The host is deliberately unresolvable: if the dry run ever
 // starts opening a socket, this test fails instead of quietly passing.
 r = run([SMTP, '--to', 'a@b.com', '--subject', 'Hi', '--body', bodyFile], FAKE);
+// A negative assertion ("X never appears") passes vacuously on a run that never
+// happened, such as a script that could not be found. Each one below first
+// requires proof that the dry run actually ran.
+const dryRanOk = r.code === 0 && /DRY RUN/.test(r.out);
+const notRun = `the dry run did not complete (exit=${r.code}), so this check proves nothing\n${r.out}`;
 check('dry run is the DEFAULT and exits 0', r.code === 0, `exit=${r.code}\n${r.out}`);
 check('dry run says it sent nothing', /DRY RUN/.test(r.out) && /nothing sent/i.test(r.out));
 check('dry run never touches the network',
-  !/ETIMEDOUT|ENOTFOUND|EAI_AGAIN|connect/i.test(r.out),
-  'an unresolvable host would have errored if it had tried');
+  dryRanOk && !/ETIMEDOUT|ENOTFOUND|EAI_AGAIN|connect/i.test(r.out),
+  dryRanOk ? 'an unresolvable host would have errored if it had tried' : notRun);
 check('dry run shows the envelope', /a@b\.com/.test(r.out) && /Hi/.test(r.out));
-check('credential never appears in dry-run output', !/not-a-real-password/.test(r.out));
+check('credential never appears in dry-run output',
+  dryRanOk && !/not-a-real-password/.test(r.out),
+  dryRanOk ? 'the password was printed' : notRun);
 
 console.log(failed ? `\n${failed} FAILED` : '\nall smoke tests passed.');
 process.exit(failed ? 1 : 0);

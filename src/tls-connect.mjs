@@ -1,7 +1,7 @@
 /**
  * Bounded, retrying TLS connect.
  *
- * Everything below is measured behaviour, not documentation reading. Each note is
+ * Everything below is measured behavior, not documentation reading. Each note is
  * a bug that shipped, or nearly shipped, and the measurement that settled it.
  *
  * ── WHY A CONNECT NEEDS BOUNDING AT ALL ─────────────────────────────────────
@@ -124,17 +124,17 @@ export async function connectWithRetry({
     } catch (e) {
       last = e;
       if (!isRetryable(e)) {
-        log(`${what} connect failed unretryably (${describe(e)}) — not a transient network fault`);
+        log(`${what} connect failed unretryably (${describe(e)}): not a transient network fault`);
         break;
       }
       if (i === attempts - 1) break;
       const wait = backoff[Math.min(i, backoff.length - 1)];
-      log(`${what} connect attempt ${i + 1}/${attempts} failed (${describe(e)}) — retrying in ${wait / 1000}s`);
+      log(`${what} connect attempt ${i + 1}/${attempts} failed (${describe(e)}), retrying in ${wait / 1000}s`);
       await new Promise((r) => setTimeout(r, wait));
     }
   }
   const err = new Error(
-    `could not connect to ${host}:${port} after ${attempts} attempts — last error: ${describe(last)}`,
+    `could not connect to ${host}:${port} after ${attempts} attempts, last error: ${describe(last)}`,
   );
   err.code = last?.code ?? 'ECONNFAIL';
   err.cause = last;

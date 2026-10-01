@@ -132,7 +132,7 @@ if (attach.length) {
 // ---- dry run --------------------------------------------------------------
 const recipients = [...to, ...cc];
 if (!live) {
-  console.log('DRY RUN — nothing sent. Add --send to actually send.\n');
+  console.log('DRY RUN: nothing sent. Add --send to actually send.\n');
   console.log(`From:    ${FROM_NAME ? FROM_NAME + ' ' : ''}<${USER}>`);
   console.log(`To:      ${to.join(', ')}`);
   if (cc.length) console.log(`Cc:      ${cc.join(', ')}`);
@@ -140,7 +140,7 @@ if (!live) {
   for (const f of attach) {
     console.log(`Attach:  ${basename(f)}  (${typeOf(f)}, ${readFileSync(f).length} bytes)`);
   }
-  console.log(`Body:    ${bodyFile} — ${body.split('\n').length} lines, ${body.length} chars`);
+  console.log(`Body:    ${bodyFile}  (${body.split('\n').length} lines, ${body.length} chars)`);
   console.log('\n--- first 15 lines of body ---');
   console.log(body.split('\n').slice(0, 15).join('\n'));
   process.exit(0);
@@ -159,7 +159,7 @@ let waiter = null;
  *
  * THE BUG THIS FLAG EXISTS FOR, because it is the expensive kind: the error
  * handler used to be unconditional, so the server dropping the connection after
- * QUIT — which many do, routinely — printed "connection failed" and exited 1 for
+ * QUIT (which many do, routinely) printed "connection failed" and exited 1 for
  * mail that had ALREADY BEEN ACCEPTED.
  *
  * The natural human response to "SEND FAILED" is to send again. So the bug's
@@ -174,7 +174,7 @@ sock.on('data', (c) => {
 });
 sock.on('error', (e) => {
   if (accepted) {
-    console.error(`(post-acceptance socket close: ${describe(e)} — message was already accepted, not resending)`);
+    console.error(`(post-acceptance socket close: ${describe(e)}. Message was already accepted, not resending.)`);
     return;
   }
   console.error('connection failed:', describe(e));
@@ -247,7 +247,7 @@ try {
   await cmd('DATA', [354]);
   sock.write(dotStuff(message) + '\r\n.\r\n');
   const ok = await expect([250]);
-  accepted = true; // MUST be set BEFORE QUIT — servers often drop the socket there
+  accepted = true; // MUST be set BEFORE QUIT: servers often drop the socket there
   console.log(`\naccepted for delivery: ${ok.trim()}`);
   console.log(`recipients: ${recipients.join(', ')}`);
   console.log('NOTE: acceptance is not delivery. Confirm in the sent folder if it matters.');
@@ -256,7 +256,7 @@ try {
   try {
     await cmd('QUIT', [221], false, 5_000);
   } catch (e) {
-    console.error(`(QUIT did not complete cleanly: ${e.message} — message was already accepted)`);
+    console.error(`(QUIT did not complete cleanly: ${e.message}. Message was already accepted.)`);
   }
   sock.end();
 } catch (e) {

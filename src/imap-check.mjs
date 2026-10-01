@@ -120,7 +120,7 @@ try {
   const boxes = await cmd('LIST "" "*"');
   console.log(`mailboxes  ${boxes.filter((l) => l.startsWith('* LIST')).length}`);
 
-  done = true; // set BEFORE LOGOUT — the server may RST as it processes it
+  done = true; // set BEFORE LOGOUT: the server may RST as it processes it
   await cmd('LOGOUT');
   console.log('\nREAD-ONLY check passed. Nothing was modified, nothing was sent.');
   sock.end();
