@@ -95,14 +95,16 @@ console.log('tls-connect:');
     await s.secure;
     for (let line; (line = await s.line()) !== null;) s.send(`echo ${line}`);
   });
-  const r = await within(connectOnce({ host: '127.0.0.1', port: srv.port, timeoutMs: 200 }), 5_000);
+  // timeoutMs must leave room for a cold TLS handshake on a slow CI runner: 200 ms
+  // failed once on windows-latest before the handshake finished.
+  const r = await within(connectOnce({ host: '127.0.0.1', port: srv.port, timeoutMs: 1_000 }), 5_000);
   let pass = false;
   let detail = r.hung ? 'connect still pending after 5s' : `connect failed: ${describe(r.e)}`;
   if (r.v) {
     const sock = r.v;
     let err = null;
     sock.on('error', (e) => { err = e; });
-    await pause(600); // three times timeoutMs
+    await pause(1_500); // well past timeoutMs, when a still-attached timeout signal would fire
     const reply = new Promise((res) => sock.once('data', (d) => res(String(d))));
     sock.write('ping\r\n');
     const got = await within(reply, 2_000);
