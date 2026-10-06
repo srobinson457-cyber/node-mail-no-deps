@@ -2,7 +2,9 @@
 
 SMTP and IMAP clients written directly against `node:tls`. No npm dependencies, at any depth.
 
-Extracted in September 2026 from private code I wrote and run in production; the history stays private because it contains private data.
+Extracted in September 2026 from private code I run in production, built agent-first with
+Claude Code; the history stays private because it contains private data. How I build and check
+code: [REVIEWING.md](https://github.com/srobinson457-cyber/srobinson457-cyber/blob/main/REVIEWING.md).
 
 ```bash
 node src/smtp-send.mjs --to a@b.com --subject "Hi" --body msg.txt   # dry run by default
@@ -10,8 +12,8 @@ node src/imap-check.mjs
 ```
 
 The mail clients are the smaller half of this. The larger half is
-[`src/tls-connect.mjs`](src/tls-connect.mjs), which is a bounded retrying TLS connect and a
-set of **measured** notes on how Node actually behaves when a connect goes wrong. Most of
+[`src/tls-connect.mjs`](src/tls-connect.mjs), a bounded retrying TLS connect, and the
+**measured** notes below on how Node actually behaves when a connect goes wrong. Most of
 those apply to anything that opens a socket, not just mail.
 
 ---
@@ -53,7 +55,7 @@ Use an `AbortController` you cancel yourself on `secureConnect`.
 ### `options.timeout` and `socket.setTimeout()` do not bound a connect either.
 
 They are **inactivity** timers. They emit an event and leave the socket live. Only an
-`AbortSignal` actually aborts the attempt.
+`AbortSignal` actually aborts the attempt (verified: `ABORT_ERR` at 3004ms).
 
 ### Happy Eyeballs does not bound the last address.
 
@@ -107,7 +109,9 @@ Node printed `Detected unsettled top-level await` and exited 13. Sent message, r
 same hazard.
 
 Both are guarded now, and the guard is the same idea in two places: **after acceptance, no
-transport error can be a send failure.**
+transport error can be a send failure.** `test/protocol.mjs` checks it against a fake server
+that resets the connection after `QUIT`. It has to be a reset: a clean close never raises a
+socket error, so the test would pass with the guard removed.
 
 ---
 
@@ -118,7 +122,8 @@ transport error can be a send failure.**
   unresolvable host so that a dry run which ever starts opening a socket fails the test rather
   than quietly passing.
 - **The credential is never printed.** `AUTH PLAIN` logs as `> <redacted>`, `LOGIN` as
-  `> LOGIN <credential withheld>`, and a test asserts the password never appears in output.
+  `> LOGIN <credential withheld>`, and tests assert the password never appears in dry-run or
+  live output.
 - **A 250 is acceptance, not delivery.** The tool says so on every send. Verify in the sent
   folder if it matters; `imap-check.mjs` is the tool for that.
 - **Nothing is hardcoded.** Host, port, user and password all come from the environment.
@@ -157,7 +162,7 @@ const sock = await connectWithRetry({ host: 'example.com', port: 443, label: 'ap
 ```
 
 ```bash
-npm test      # 15 smoke tests, no credentials, no network
+npm test      # 15 smoke tests + 18 protocol tests on fake servers at 127.0.0.1; no credentials, no internet
 ```
 
 ---
