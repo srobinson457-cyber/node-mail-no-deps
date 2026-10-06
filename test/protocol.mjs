@@ -8,7 +8,7 @@
  * by removing that guard and watching the case fail.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { writeFileSync, mkdtempSync } from 'node:fs';
+import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -145,6 +145,9 @@ console.log('tls-connect:');
 console.log('\nsmtp-send:');
 
 const dir = mkdtempSync(path.join(tmpdir(), 'mailproto-'));
+// 'exit' also fires on process.exit() and on an uncaught error, so a failed
+// check or a crash removes the directory too.
+process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
 const bodyFile = path.join(dir, 'body.txt');
 writeFileSync(bodyFile, 'first line\n.leading dot\n.\nlast line\n');
 const send = (port) => run(SMTP, ['--to', 'rcpt@example.com', '--subject', 'Test', '--body', bodyFile, '--send'], {
