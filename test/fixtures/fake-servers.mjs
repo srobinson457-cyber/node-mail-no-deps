@@ -116,10 +116,12 @@ export async function fakeSmtp({ greeting = ['220 fake.test ESMTP ready'], after
  * IMAP. `greetDelayMs` holds the greeting back after the handshake; `seen.early`
  * records a command that arrived before it. `closeOn` ends the connection
  * cleanly when that command arrives, `resetOn` sends a TCP reset instead, and in
- * both cases the command gets no reply.
+ * both cases the command gets no reply. `silentOn` never answers that command
+ * and leaves the connection open.
  */
 export async function fakeImap({
   greeting = '* OK [CAPABILITY IMAP4rev1] fake ready', greetDelayMs = 0, closeOn = null, resetOn = null,
+  silentOn = null,
 } = {}) {
   const seen = { commands: [], early: false };
   const server = await listen(async (s) => {
@@ -134,6 +136,7 @@ export async function fakeImap({
       seen.commands.push(cmd);
       if (cmd === closeOn) return s.end();
       if (cmd === resetOn) return s.reset();
+      if (cmd === silentOn) continue;
       if (cmd === 'LOGIN') s.send(`${tag} OK LOGIN completed`);
       else if (cmd === 'EXAMINE') {
         s.send(`* 3 EXISTS\r\n* 0 RECENT\r\n* OK [UIDVALIDITY 1] ok\r\n${tag} OK [READ-ONLY] EXAMINE completed`);

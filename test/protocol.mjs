@@ -245,5 +245,17 @@ const imap = (port, opts) => run(IMAP, ['--to', 'support@example.com'], {
     r.code === 0 && /READ-ONLY check passed/.test(r.out), show(r));
 }
 
+{
+  // The limit is past the 20 s command timeout, so a LOGOUT that waits it out
+  // shows up as a 20 s run rather than as a kill.
+  const srv = await fakeImap({ silentOn: 'LOGOUT' });
+  const r = await imap(srv.port, { mark: /> LOGOUT/, limitMs: 25_000 });
+  await srv.close();
+  check('LOGOUT never answered: exits 0 after the 5s LOGOUT timeout, not the 20s one',
+    r.code === 0 && /READ-ONLY check passed/.test(r.out) && /timed out after 5s waiting for LOGOUT/.test(r.out) &&
+      r.afterMark !== null && r.afterMark < 8_000,
+    show(r));
+}
+
 console.log(failed ? `\n${failed} FAILED` : '\nall protocol tests passed.');
 process.exit(failed ? 1 : 0);

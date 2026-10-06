@@ -159,7 +159,7 @@ const sock = await connectWithRetry({ host: 'example.com', port: 443, label: 'ap
 ```
 
 ```bash
-npm test      # 15 smoke tests + 14 protocol tests on fake servers at 127.0.0.1; no credentials, no internet
+npm test      # 15 smoke tests + 15 protocol tests on fake servers at 127.0.0.1; no credentials, no internet
 ```
 
 ---

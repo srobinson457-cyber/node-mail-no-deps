@@ -66,10 +66,10 @@ sock.on('error', (e) => {
 });
 
 // Resolves with the untagged lines; a tagged NO or BAD rejects with its text.
-const cmd = async (text, secret = false) => {
+const cmd = async (text, secret = false, timeoutMs = TIMEOUT_MS) => {
   const tag = `a${++seq}`;
   process.stdout.write(secret ? '  > LOGIN <credential withheld>\n' : `  > ${text}\n`);
-  const reply = reader.wait(text.split(' ')[0], new RegExp(`^${tag} (OK|NO|BAD)[^\\r\\n]*\\r\\n`, 'm'), TIMEOUT_MS);
+  const reply = reader.wait(text.split(' ')[0], new RegExp(`^${tag} (OK|NO|BAD)[^\\r\\n]*\\r\\n`, 'm'), timeoutMs);
   sock.write(`${tag} ${text}\r\n`);
   const lines = (await reply).split(/\r?\n/).filter(Boolean);
   const status = lines.pop().slice(tag.length + 1);
@@ -108,9 +108,10 @@ try {
 
   done = true; // set BEFORE LOGOUT: the server may RST as it processes it
   // Every check has already passed, so a LOGOUT that fails is teardown, not a
-  // failed check.
+  // failed check. Bounded at 5 s, as smtp-send bounds QUIT: a server that never
+  // answers LOGOUT should not hold a passed check open for the full 20 s.
   try {
-    await cmd('LOGOUT');
+    await cmd('LOGOUT', false, 5_000);
   } catch (e) {
     console.error(`(LOGOUT did not complete cleanly: ${e.message}. The checks above had passed.)`);
   }
