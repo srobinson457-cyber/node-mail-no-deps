@@ -2,7 +2,9 @@
 
 SMTP and IMAP clients written directly against `node:tls`. No npm dependencies, at any depth.
 
-Extracted in September 2026 from private code I wrote and run in production; the history stays private because it contains private data.
+Extracted in September 2026 from private code I run in production, built agent-first with
+Claude Code; the history stays private because it contains private data. How I build and check
+code: [REVIEWING.md](https://github.com/srobinson457-cyber/srobinson457-cyber/blob/main/REVIEWING.md).
 
 ```bash
 node src/smtp-send.mjs --to a@b.com --subject "Hi" --body msg.txt   # dry run by default
