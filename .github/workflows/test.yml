@@ -18,6 +18,10 @@ jobs:
           node-version: ${{ matrix.node }}
       # No install step. There is nothing to install, which is the point.
       - run: node test/smoke.mjs
+      # Fake SMTP and IMAP servers on 127.0.0.1; no credentials, no internet.
+      - run: node test/protocol.mjs
       # Again from outside the repo, so a path that only resolves from the root fails CI.
       - run: node "${{ github.workspace }}/test/smoke.mjs"
+        working-directory: ${{ runner.temp }}
+      - run: node "${{ github.workspace }}/test/protocol.mjs"
         working-directory: ${{ runner.temp }}
