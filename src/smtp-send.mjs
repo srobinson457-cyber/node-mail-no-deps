@@ -35,6 +35,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { basename, extname } from 'node:path';
 import { connectWithRetry, describe } from './tls-connect.mjs';
+import { replyReader } from './reply-reader.mjs';
 
 const HOST = process.env.SMTP_HOST;
 const PORT = Number(process.env.SMTP_PORT ?? 465);
@@ -148,9 +149,9 @@ if (!live) {
 
 // ---- SMTP -----------------------------------------------------------------
 const sock = await connectWithRetry({ host: HOST, port: PORT, label: 'smtp' });
-sock.setEncoding('utf8');
-let buf = '';
-let waiter = null;
+// Also rejects a wait at once if the socket closes or errors, rather than
+// sitting out the full timeout.
+const reader = replyReader(sock);
 
 /**
  * Set the instant the server returns 250 for the DATA payload. Past this point
@@ -168,10 +169,6 @@ let waiter = null;
  */
 let accepted = false;
 
-sock.on('data', (c) => {
-  buf += c;
-  pump();
-});
 sock.on('error', (e) => {
   if (accepted) {
     console.error(`(post-acceptance socket close: ${describe(e)}. Message was already accepted, not resending.)`);
@@ -184,20 +181,9 @@ sock.on('error', (e) => {
   process.exitCode = 1;
 });
 
-function pump() {
-  if (!waiter) return;
-  // A reply is COMPLETE only on "NNN<space>". "NNN-" is a continuation line, so
-  // matching on the code alone truncates multi-line greetings and EHLO replies.
-  const m = buf.match(/^\d{3} [^\r\n]*\r\n/m);
-  if (!m) return;
-  const end = m.index + m[0].length;
-  const reply = buf.slice(0, end);
-  buf = buf.slice(end);
-  const { codes, resolve, reject } = waiter;
-  waiter = null;
-  const got = Number(reply.match(/^(\d{3})/m)[1]);
-  codes.includes(got) ? resolve(reply) : reject(new Error(`expected ${codes}, got: ${reply.trim()}`));
-}
+// A reply is COMPLETE only on "NNN<space>". "NNN-" is a continuation line, so
+// matching on the code alone truncates multi-line greetings and EHLO replies.
+const REPLY_END = /^\d{3} [^\r\n]*\r\n/m;
 
 /**
  * Every wait is bounded. Without this, a reply that never arrives leaves the
@@ -208,24 +194,12 @@ function pump() {
  * then vanished instead of answering QUIT. A SENT message reported failure to
  * the caller, which is the same duplicate-send hazard as above by another route.
  */
-const expect = (codes, timeoutMs = 30_000) =>
-  new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      if (waiter) { waiter = null; reject(new Error(`timed out after ${timeoutMs / 1000}s waiting for ${codes}`)); }
-    }, timeoutMs);
-    waiter = {
-      codes,
-      resolve: (v) => { clearTimeout(timer); resolve(v); },
-      reject: (e) => { clearTimeout(timer); reject(e); },
-    };
-    pump();
-  });
-
-// A close with a reply outstanding is a failed wait, not a hang. Reject at once
-// rather than sitting out the full timeout.
-sock.on('close', () => {
-  if (waiter) { const w = waiter; waiter = null; w.reject(new Error('connection closed before reply')); }
-});
+const expect = async (codes, timeoutMs = 30_000) => {
+  const reply = await reader.wait(String(codes), REPLY_END, timeoutMs);
+  const got = Number(reply.match(/^(\d{3})/m)[1]);
+  if (!codes.includes(got)) throw new Error(`expected ${codes}, got: ${reply.trim()}`);
+  return reply;
+};
 
 const cmd = (line, codes, secret = false, timeoutMs = 30_000) => {
   console.log(secret ? '> <redacted>' : `> ${line}`);

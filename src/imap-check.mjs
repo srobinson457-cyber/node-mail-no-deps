@@ -25,6 +25,7 @@
  *         useful for verifying that forwarding or routing actually works.
  */
 import { connectWithRetry, describe } from './tls-connect.mjs';
+import { replyReader } from './reply-reader.mjs';
 
 const HOST = process.env.IMAP_HOST;
 const PORT = Number(process.env.IMAP_PORT ?? 993);
@@ -53,23 +54,10 @@ const sock = await connectWithRetry({ host: HOST, port: PORT, label: 'imap' });
  * "connection failed" and exit 1 on a check that actually PASSED.
  */
 let done = false;
-let buf = '';
 let seq = 0;
-const pending = new Map();
+const reader = replyReader(sock);
+const TIMEOUT_MS = 20_000;
 
-sock.setEncoding('utf8');
-sock.on('data', (chunk) => {
-  buf += chunk;
-  for (const [tag, { lines, resolve, reject }] of pending) {
-    const re = new RegExp(`^${tag} (OK|NO|BAD)([^\r\n]*)`, 'm');
-    const m = buf.match(re);
-    if (!m) continue;
-    lines.push(...buf.slice(0, m.index).split(/\r?\n/).filter(Boolean));
-    buf = buf.slice(m.index + m[0].length);
-    pending.delete(tag);
-    m[1] === 'OK' ? resolve(lines) : reject(new Error(`${m[1]}${m[2]}`));
-  }
-});
 sock.on('error', (e) => {
   if (done) return; // post-LOGOUT teardown, not a failure
   console.error('connection failed:', describe(e));
@@ -77,31 +65,29 @@ sock.on('error', (e) => {
   process.exitCode = 1;
 });
 
-const cmd = (text, secret = false) =>
-  new Promise((resolve, reject) => {
-    const tag = `a${++seq}`;
-    pending.set(tag, { lines: [], resolve, reject });
-    process.stdout.write(secret ? '  > LOGIN <credential withheld>\n' : `  > ${text}\n`);
-    sock.write(`${tag} ${text}\r\n`);
-    setTimeout(() => {
-      if (pending.has(tag)) {
-        pending.delete(tag);
-        reject(new Error(`${text.split(' ')[0]} timed out`));
-      }
-    }, 20_000);
-  });
-
-// connectWithRetry already resolved ON 'secureConnect', so re-listening for it
-// would hang forever. Only the greeting settle remains.
-await new Promise((r) => setTimeout(r, 400));
-buf = '';                                   // drop the server greeting
-console.log(`connected  ${HOST}:${PORT}  TLS ${sock.getProtocol()}`);
-console.log(`account    ${USER}`);
+// Resolves with the untagged lines; a tagged NO or BAD rejects with its text.
+const cmd = async (text, secret = false) => {
+  const tag = `a${++seq}`;
+  process.stdout.write(secret ? '  > LOGIN <credential withheld>\n' : `  > ${text}\n`);
+  const reply = reader.wait(text.split(' ')[0], new RegExp(`^${tag} (OK|NO|BAD)[^\\r\\n]*\\r\\n`, 'm'), TIMEOUT_MS);
+  sock.write(`${tag} ${text}\r\n`);
+  const lines = (await reply).split(/\r?\n/).filter(Boolean);
+  const status = lines.pop().slice(tag.length + 1);
+  if (!status.startsWith('OK')) throw new Error(status);
+  return lines;
+};
 
 const searchCount = (lines) =>
   (lines.find((l) => l.startsWith('* SEARCH')) || '').split(/\s+/).slice(2).filter(Boolean).length;
 
 try {
+  // The greeting is the first line the server sends. Read it rather than
+  // sleeping past it, so nothing is sent before the server is ready.
+  const greeting = (await reader.wait('greeting', /^[^\r\n]*\r\n/, TIMEOUT_MS)).trim();
+  if (!/^\* OK\b/i.test(greeting)) throw new Error(`server did not greet with OK: ${greeting}`);
+  console.log(`connected  ${HOST}:${PORT}  TLS ${sock.getProtocol()}`);
+  console.log(`account    ${USER}`);
+
   await cmd(`LOGIN "${USER}" "${PASS}"`, true);
   console.log('login      OK');
 
@@ -121,7 +107,13 @@ try {
   console.log(`mailboxes  ${boxes.filter((l) => l.startsWith('* LIST')).length}`);
 
   done = true; // set BEFORE LOGOUT: the server may RST as it processes it
-  await cmd('LOGOUT');
+  // Every check has already passed, so a LOGOUT that fails is teardown, not a
+  // failed check.
+  try {
+    await cmd('LOGOUT');
+  } catch (e) {
+    console.error(`(LOGOUT did not complete cleanly: ${e.message}. The checks above had passed.)`);
+  }
   console.log('\nREAD-ONLY check passed. Nothing was modified, nothing was sent.');
   sock.end();
 } catch (e) {
@@ -131,6 +123,9 @@ try {
       'same account.'
     : '';
   console.error(`\nfailed: ${e.message}${hint}`);
-  sock.end();
-  process.exit(1);
+  // Set the code and let the loop drain, as smtp-send does, rather than calling
+  // process.exit() while the socket closes. No timer is left armed, so the
+  // process exits as soon as the socket is gone.
+  sock.destroy();
+  process.exitCode = 1;
 }
