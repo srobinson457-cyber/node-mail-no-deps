@@ -150,14 +150,24 @@ const dir = mkdtempSync(path.join(tmpdir(), 'mailproto-'));
 process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
 const bodyFile = path.join(dir, 'body.txt');
 writeFileSync(bodyFile, 'first line\n.leading dot\n.\nlast line\n');
-const send = (port) => run(SMTP, ['--to', 'rcpt@example.com', '--subject', 'Test', '--body', bodyFile, '--send'], {
-  SMTP_HOST: '127.0.0.1', SMTP_PORT: String(port), SMTP_USER: 'sender@example.com', SMTP_PASS: 'fake-password',
-});
+
+// Output of every run whose server received the credential, for the redaction
+// check at the end. Taking the server lets a run be counted only if the
+// credential really went over the wire.
+const PASSWORD = 'fake-password';
+const credentialRuns = [];
+const send = async (srv) => {
+  const r = await run(SMTP, ['--to', 'rcpt@example.com', '--subject', 'Test', '--body', bodyFile, '--send'], {
+    SMTP_HOST: '127.0.0.1', SMTP_PORT: String(srv.port), SMTP_USER: 'sender@example.com', SMTP_PASS: PASSWORD,
+  });
+  if (srv.seen.commands.includes('AUTH')) credentialRuns.push({ cli: 'smtp-send', ...r });
+  return r;
+};
 
 {
   // A reset, not a clean close: only a reset makes the client see a socket error.
   const srv = await fakeSmtp({ onQuit: 'reset' });
-  const r = await send(srv.port);
+  const r = await send(srv);
   await srv.close();
   check('reset after QUIT: exits 0 and says the message was already accepted',
     r.code === 0 && /accepted for delivery/.test(r.out) && /post-acceptance socket close/.test(r.out) &&
@@ -167,7 +177,7 @@ const send = (port) => run(SMTP, ['--to', 'rcpt@example.com', '--subject', 'Test
 
 {
   const srv = await fakeSmtp({ afterData: 'reset' });
-  const r = await send(srv.port);
+  const r = await send(srv);
   await srv.close();
   check('dropped before the 250: exits 1 with SEND FAILED',
     srv.seen.data !== null && r.code === 1 && /SEND FAILED/.test(r.out) && !/accepted for delivery/.test(r.out),
@@ -175,8 +185,18 @@ const send = (port) => run(SMTP, ['--to', 'rcpt@example.com', '--subject', 'Test
 }
 
 {
+  const srv = await fakeSmtp({ auth: 'reject' });
+  const r = await send(srv);
+  await srv.close();
+  check('AUTH rejected with 535: exits 1 with SEND FAILED and sends nothing after AUTH',
+    r.code === 1 && /SEND FAILED: expected 235, got: 535/.test(r.out) && !/accepted for delivery/.test(r.out) &&
+      srv.seen.commands.join(' ') === 'EHLO AUTH',
+    `server saw: ${srv.seen.commands.join(' ')}\n        ${show(r)}`);
+}
+
+{
   const srv = await fakeSmtp({ greeting: ['220-fake.test ESMTP', '220-a greeting in three lines', '220 ready'] });
-  const r = await send(srv.port);
+  const r = await send(srv);
   await srv.close();
   check('multi-line 220- greeting is read to its last line',
     r.code === 0 && /accepted for delivery/.test(r.out) && srv.seen.commands[0] === 'EHLO',
@@ -185,7 +205,7 @@ const send = (port) => run(SMTP, ['--to', 'rcpt@example.com', '--subject', 'Test
 
 {
   const srv = await fakeSmtp();
-  const r = await send(srv.port);
+  const r = await send(srv);
   await srv.close();
   const data = srv.seen.data ?? [];
   check('a body line starting with "." arrives dot-stuffed',
@@ -196,13 +216,17 @@ const send = (port) => run(SMTP, ['--to', 'rcpt@example.com', '--subject', 'Test
 // ---- imap-check --------------------------------------------------------------
 console.log('\nimap-check:');
 
-const imap = (port, opts) => run(IMAP, ['--to', 'support@example.com'], {
-  IMAP_HOST: '127.0.0.1', IMAP_PORT: String(port), IMAP_USER: 'reader@example.com', IMAP_PASS: 'fake-password',
-}, opts);
+const imap = async (srv, opts) => {
+  const r = await run(IMAP, ['--to', 'support@example.com'], {
+    IMAP_HOST: '127.0.0.1', IMAP_PORT: String(srv.port), IMAP_USER: 'reader@example.com', IMAP_PASS: PASSWORD,
+  }, opts);
+  if (srv.seen.commands.includes('LOGIN')) credentialRuns.push({ cli: 'imap-check', ...r });
+  return r;
+};
 
 {
   const srv = await fakeImap();
-  const r = await imap(srv.port, { mark: /READ-ONLY check passed/ });
+  const r = await imap(srv, { mark: /READ-ONLY check passed/ });
   await srv.close();
   check('a passing check exits 0 within 2s of reporting success',
     r.code === 0 && r.afterMark !== null && r.afterMark < 2_000, show(r));
@@ -214,7 +238,7 @@ const imap = (port, opts) => run(IMAP, ['--to', 'support@example.com'], {
 
 {
   const srv = await fakeImap({ closeOn: 'EXAMINE' });
-  const r = await imap(srv.port, { mark: /> EXAMINE/ });
+  const r = await imap(srv, { mark: /> EXAMINE/ });
   await srv.close();
   check('server closing mid-command: exits 1 within 2s, reporting the closed connection',
     r.code === 1 && r.afterMark !== null && r.afterMark < 2_000 && /connection closed/i.test(r.out), show(r));
@@ -222,7 +246,7 @@ const imap = (port, opts) => run(IMAP, ['--to', 'support@example.com'], {
 
 {
   const srv = await fakeImap({ greetDelayMs: 1_000 });
-  const r = await imap(srv.port);
+  const r = await imap(srv);
   await srv.close();
   check('waits for a slow greeting before sending anything',
     r.code === 0 && !srv.seen.early && srv.seen.commands[0] === 'LOGIN',
@@ -231,15 +255,25 @@ const imap = (port, opts) => run(IMAP, ['--to', 'support@example.com'], {
 
 {
   const srv = await fakeImap({ greeting: '* BYE too many connections' });
-  const r = await imap(srv.port);
+  const r = await imap(srv);
   await srv.close();
   check('a BYE greeting fails at once with the server\'s reason',
     r.code === 1 && /too many connections/.test(r.out) && r.ms < 4_000, show(r));
 }
 
 {
+  const srv = await fakeImap({ login: 'reject' });
+  const r = await imap(srv);
+  await srv.close();
+  check('LOGIN rejected with NO [AUTHENTICATIONFAILED]: exits 1 with the app-password hint',
+    r.code === 1 && /failed: NO \[AUTHENTICATIONFAILED\]/.test(r.out) && /app password was rejected/.test(r.out) &&
+      !/login\s+OK/.test(r.out) && srv.seen.commands.join(' ') === 'LOGIN',
+    `server saw: ${srv.seen.commands.join(' ')}\n        ${show(r)}`);
+}
+
+{
   const srv = await fakeImap({ resetOn: 'LOGOUT' });
-  const r = await imap(srv.port);
+  const r = await imap(srv);
   await srv.close();
   check('reset during LOGOUT: still exits 0, every check had passed',
     r.code === 0 && /READ-ONLY check passed/.test(r.out), show(r));
@@ -249,12 +283,30 @@ const imap = (port, opts) => run(IMAP, ['--to', 'support@example.com'], {
   // The limit is past the 20 s command timeout, so a LOGOUT that waits it out
   // shows up as a 20 s run rather than as a kill.
   const srv = await fakeImap({ silentOn: 'LOGOUT' });
-  const r = await imap(srv.port, { mark: /> LOGOUT/, limitMs: 25_000 });
+  const r = await imap(srv, { mark: /> LOGOUT/, limitMs: 25_000 });
   await srv.close();
   check('LOGOUT never answered: exits 0 after the 5s LOGOUT timeout, not the 20s one',
     r.code === 0 && /READ-ONLY check passed/.test(r.out) && /timed out after 5s waiting for LOGOUT/.test(r.out) &&
       r.afterMark !== null && r.afterMark < 8_000,
     show(r));
+}
+
+// ---- credentials -------------------------------------------------------------
+console.log('\ncredentials:');
+
+{
+  // smtp-send sends the password inside a base64 AUTH PLAIN blob, so an echoed
+  // AUTH line would not contain the plain password. Look for both.
+  const secrets = [PASSWORD, Buffer.from(`\0sender@example.com\0${PASSWORD}`).toString('base64')];
+  const leaks = credentialRuns.filter((r) => secrets.some((s) => r.out.includes(s)));
+  const count = (cli) => credentialRuns.filter((r) => r.cli === cli).length;
+  // Like the smoke test's dry-run check, this must not pass on runs that never
+  // happened, so it also requires runs of both CLIs that sent the credential.
+  check('the password never appears in live-mode output',
+    count('smtp-send') > 0 && count('imap-check') > 0 && leaks.length === 0,
+    leaks.length
+      ? leaks.map((r) => `${r.cli} printed it: ${show(r)}`).join('\n        ')
+      : `runs that sent the credential: smtp-send ${count('smtp-send')}, imap-check ${count('imap-check')}`);
 }
 
 console.log(failed ? `\n${failed} FAILED` : '\nall protocol tests passed.');

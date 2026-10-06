@@ -120,7 +120,8 @@ socket error, so the test would pass with the guard removed.
   unresolvable host so that a dry run which ever starts opening a socket fails the test rather
   than quietly passing.
 - **The credential is never printed.** `AUTH PLAIN` logs as `> <redacted>`, `LOGIN` as
-  `> LOGIN <credential withheld>`, and a test asserts the password never appears in output.
+  `> LOGIN <credential withheld>`, and tests assert the password never appears in dry-run or
+  live output.
 - **A 250 is acceptance, not delivery.** The tool says so on every send. Verify in the sent
   folder if it matters; `imap-check.mjs` is the tool for that.
 - **Nothing is hardcoded.** Host, port, user and password all come from the environment.
@@ -159,7 +160,7 @@ const sock = await connectWithRetry({ host: 'example.com', port: 443, label: 'ap
 ```
 
 ```bash
-npm test      # 15 smoke tests + 15 protocol tests on fake servers at 127.0.0.1; no credentials, no internet
+npm test      # 15 smoke tests + 18 protocol tests on fake servers at 127.0.0.1; no credentials, no internet
 ```
 
 ---

@@ -80,9 +80,11 @@ function lineSession(sock, raw) {
 /**
  * SMTP. `greeting` is sent one line at a time with a short gap, so a multi-line
  * reply really does arrive in pieces. `afterData` / `onQuit` choose between a
- * normal reply and a TCP reset.
+ * normal reply and a TCP reset. `auth: 'reject'` answers AUTH with a 535.
  */
-export async function fakeSmtp({ greeting = ['220 fake.test ESMTP ready'], afterData = 'reply', onQuit = 'reply' } = {}) {
+export async function fakeSmtp({
+  greeting = ['220 fake.test ESMTP ready'], afterData = 'reply', onQuit = 'reply', auth = 'accept',
+} = {}) {
   const seen = { commands: [], data: null };
   const server = await listen(async (s) => {
     await s.secure;
@@ -91,7 +93,7 @@ export async function fakeSmtp({ greeting = ['220 fake.test ESMTP ready'], after
       const verb = line.split(' ')[0].toUpperCase();
       seen.commands.push(verb);
       if (verb === 'EHLO') s.send('250-fake.test\r\n250 AUTH PLAIN');
-      else if (verb === 'AUTH') s.send('235 2.7.0 accepted');
+      else if (verb === 'AUTH') s.send(auth === 'reject' ? '535 5.7.8 credentials rejected' : '235 2.7.0 accepted');
       else if (verb === 'MAIL' || verb === 'RCPT') s.send('250 2.1.0 ok');
       else if (verb === 'DATA') {
         s.send('354 end data with <CRLF>.<CRLF>');
@@ -117,11 +119,12 @@ export async function fakeSmtp({ greeting = ['220 fake.test ESMTP ready'], after
  * records a command that arrived before it. `closeOn` ends the connection
  * cleanly when that command arrives, `resetOn` sends a TCP reset instead, and in
  * both cases the command gets no reply. `silentOn` never answers that command
- * and leaves the connection open.
+ * and leaves the connection open. `login: 'reject'` answers LOGIN with a tagged
+ * NO [AUTHENTICATIONFAILED].
  */
 export async function fakeImap({
   greeting = '* OK [CAPABILITY IMAP4rev1] fake ready', greetDelayMs = 0, closeOn = null, resetOn = null,
-  silentOn = null,
+  silentOn = null, login = 'accept',
 } = {}) {
   const seen = { commands: [], early: false };
   const server = await listen(async (s) => {
@@ -137,8 +140,9 @@ export async function fakeImap({
       if (cmd === closeOn) return s.end();
       if (cmd === resetOn) return s.reset();
       if (cmd === silentOn) continue;
-      if (cmd === 'LOGIN') s.send(`${tag} OK LOGIN completed`);
-      else if (cmd === 'EXAMINE') {
+      if (cmd === 'LOGIN') {
+        s.send(login === 'reject' ? `${tag} NO [AUTHENTICATIONFAILED] Invalid credentials` : `${tag} OK LOGIN completed`);
+      } else if (cmd === 'EXAMINE') {
         s.send(`* 3 EXISTS\r\n* 0 RECENT\r\n* OK [UIDVALIDITY 1] ok\r\n${tag} OK [READ-ONLY] EXAMINE completed`);
       } else if (cmd === 'SEARCH') {
         s.send(`${rest[0] === 'UNSEEN' ? '* SEARCH 2' : '* SEARCH 1 3'}\r\n${tag} OK SEARCH completed`);
