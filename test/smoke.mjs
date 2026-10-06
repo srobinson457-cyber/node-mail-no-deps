@@ -48,7 +48,7 @@ check('AggregateError of retryables is retryable',
   isRetryable({ errors: [{ code: 'ETIMEDOUT' }, { code: 'ECONNRESET' }] }));
 check('AggregateError with one unretryable is NOT retryable',
   !isRetryable({ errors: [{ code: 'ETIMEDOUT' }, { code: 'CERT_HAS_EXPIRED' }] }));
-check('ABORT_ERR is retryable (our own deadline firing)', RETRYABLE.has('ABORT_ERR'));
+check('ABORT_ERR is retryable', RETRYABLE.has('ABORT_ERR'));
 
 console.log('\nsmtp-send:');
 
